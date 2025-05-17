@@ -588,12 +588,62 @@
 import argparse
 from train import prepare_data, train_propensity
 from train import plotpath, Causal_Model
-# from baselines_new import DLMF, PopularBase, MF, CausalNeighborBase, CausEProd, DLMF2, DLMF3,DLMF4, DLMF_MLP
-from baselines import DLMF, PopularBase, MF, CausalNeighborBase, DLMF2
+from baselines_new import DLMF, PopularBase, MF, CausalNeighborBase, CausEProd, DLMF2, DLMF3,DLMF4, DLMF_MLP
+# from baselines import DLMF, PopularBase, MF, CausalNeighborBase, DLMF2
 # from baselines_ import DLMF
 import numpy as np
 # from CJBR_new import CJBPR
 # from EM import PropensityModel, train_propensity
+
+# mlp_reranker.py
+import numpy as np
+import pandas as pd
+from tensorflow.keras import layers, models
+from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
+
+
+def prepare_rerank_features(df: pd.DataFrame) -> pd.DataFrame:
+    epsilon = 1e-6
+    df = df.copy()
+    df["uplift_x_rel"] = df["uplift"] * df["relevance"]
+    df["rel_minus_uplift"] = df["relevance"] - df["uplift"]
+    df["uplift_adj"] = df["uplift"] / (df["propensity"] + epsilon)
+    df["log_uplift"] = np.log(df["uplift"] + epsilon)
+    df["log_relevance"] = np.log(df["relevance"] + epsilon)
+    df["prop_x_rel"] = df["propensity"] * df["relevance"]
+    df["uplift_div_rel"] = df["uplift"] / (df["relevance"] + epsilon)
+
+    return df[[
+        "uplift", "relevance", "propensity",
+        "uplift_x_rel", "rel_minus_uplift", "uplift_adj",
+        "log_uplift", "log_relevance", "prop_x_rel", "uplift_div_rel"
+    ]]
+
+def train_rerank_mlp(X_train, y_train):
+    model = models.Sequential([
+        layers.Input(shape=(X_train.shape[1],)),
+        layers.Dense(64, activation='relu'),
+        layers.Dropout(0.2),
+        layers.Dense(32, activation='relu'),
+        layers.Dropout(0.2),
+        layers.Dense(1, activation='sigmoid'),
+    ])
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['AUC'])
+    model.fit(X_train, y_train, batch_size=256, epochs=10, validation_split=0.1, verbose=0)
+    return model
+
+def fast_pareto(uplift, relevance):
+    indices = np.argsort(-uplift)  # сортировка по убыванию uplift
+    best_relevance = -np.inf
+    pareto = []
+
+    for i in indices:
+        if relevance[i] > best_relevance:
+            pareto.append(i)
+            best_relevance = relevance[i]
+
+    return np.array(pareto)
+
 
 import tensorflow as tf
 from evaluator import Evaluator
@@ -642,6 +692,7 @@ parser.add_argument("--to_prob", default=True, type=bool,
 parser.add_argument('--ablation_variant', type=str, default='baseline',
                     choices=['baseline', 'no_dropout', 'no_layernorm', 'no_film', 'no_bce_losses', 'no_init_relevance'])
 flag = parser.parse_args()
+import lightgbm as lgb
 
 # Функция нормализации: (с параметром to_prob=True - как у авторов гита, с to_prob=False - как в статье)
 def get_norm(vec, to_prob=True, mu=0.5, sigma=0.25):
@@ -650,6 +701,57 @@ def get_norm(vec, to_prob=True, mu=0.5, sigma=0.25):
         vec_norm = sigma * vec_norm
         vec_norm = np.clip((vec_norm + mu), 0.0, 1.0)
     return vec_norm
+
+import numpy as np
+import pandas as pd
+
+def prepare_rerank_features(df: pd.DataFrame) -> pd.DataFrame:
+    epsilon = 1e-6
+    df = df.copy()
+    df["uplift_x_rel"] = df["uplift"] * df["relevance"]
+    df["rel_minus_uplift"] = df["relevance"] - df["uplift"]
+    df["uplift_adj"] = df["uplift"] / (df["propensity"] + epsilon)
+    df["log_uplift"] = np.log(np.clip(df["uplift"], a_min=epsilon, a_max=None))
+    df["log_relevance"] = np.log(np.clip(df["relevance"], a_min=epsilon, a_max=None))
+    df["prop_x_rel"] = df["propensity"] * df["relevance"]
+    df["uplift_div_rel"] = df["uplift"] / (df["relevance"] + epsilon)
+
+    return df[[
+        "uplift", "relevance", "propensity",
+        "uplift_x_rel", "rel_minus_uplift", "uplift_adj",
+        "log_uplift", "log_relevance", "prop_x_rel", "uplift_div_rel"
+    ]]
+
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
+
+def train_reranker_logreg(train_df: pd.DataFrame):
+    df = pd.DataFrame({
+        "uplift": train_df["uplift"],
+        "relevance": train_df["relevance"],
+        "propensity": train_df["propensity"],
+        "label": train_df["outcome"]
+    })
+    X = prepare_rerank_features(df)
+    y = df["label"].values
+
+    pipeline = make_pipeline(
+        StandardScaler(),
+        LogisticRegression(max_iter=1000)
+    )
+    pipeline.fit(X, y)
+    return pipeline
+
+def predict_reranker(model, test_df: pd.DataFrame):
+    df = pd.DataFrame({
+        "uplift": test_df["pred_upl"],
+        "relevance": test_df["pred_rel"],
+        "propensity": test_df["propensity_estimate"]
+    })
+    X = prepare_rerank_features(df)
+    return model.predict_proba(X)[:, 1]  # вероятность класса 1
+
 
 def main(flag=flag):
     cp10list_pred = []
@@ -802,17 +904,17 @@ def main(flag=flag):
             rf = 0.1
             itr = 100e6
 
-        # with open("vesa_pers_dlmf/dlmf_weights.pkl", "rb") as f:
-        #     saved_state = pickle.load(f)
+        with open("dlmf_weights.pkl", "rb") as f:
+            saved_state = pickle.load(f)
 
         # recommender = DLMF(num_users, num_items, capping_T = cap, 
         #                    capping_C = cap, learn_rate = lr, reg_factor = rf)
 
-        # # recommender = DLMF3(num_users, num_items, capping_T=cap, capping_C=cap, learn_rate=lr, reg_factor=rf, use_DR=True)
+        recommender_uplift = DLMF3(num_users, num_items, capping_T=cap, capping_C=cap, learn_rate=lr, reg_factor=rf, use_DR=True)
 
 
-        # recommender.__dict__.update(saved_state)
-        # print("DLMF weights loaded successfully!")
+        recommender_uplift.__dict__.update(saved_state)
+        print("DLMF weights loaded successfully!")
 
         # recommender = PopularBase(num_users, num_items)
         # recommender.train(train_df, iter=itr)
@@ -823,11 +925,11 @@ def main(flag=flag):
         # recommender = DLMF2(num_users, num_items, capping_T=cap, capping_C=cap, learn_rate=lr, reg_factor=rf)
         # recommender.train(train_df, iter=itr)
 
-        recommender = DLMF(num_users, num_items, capping_T=cap, capping_C=cap, learn_rate=lr, reg_factor=rf)
-        recommender.train(train_df, iter=itr)
-
-        # recommender = DLMF3(num_users, num_items, capping_T=cap, capping_C=cap, learn_rate=lr, reg_factor=rf, use_DR=True)
+        # recommender = DLMF(num_users, num_items, capping_T=cap, capping_C=cap, learn_rate=lr, reg_factor=rf)
         # recommender.train(train_df, iter=itr)
+
+        # recommender_uplift = DLMF3(num_users, num_items, capping_T=cap, capping_C=cap, learn_rate=lr, reg_factor=rf, use_DR=True)
+        # recommender_uplift.train(train_df, iter=itr)
         
 
         # recommender = DLMF_MLP(num_users, num_items, capping_T=cap, capping_C=cap, learn_rate=lr, reg_factor=rf)
@@ -840,8 +942,8 @@ def main(flag=flag):
         # recommender = CausalNeighborBase(num_users, num_items)
         # recommender.train(train_df, iter=itr)
 
-        # recommender = MF(num_users, num_items)
-        # recommender.train(train_df, iter=itr)        
+        recommender_relevance = MF(num_users, num_items)
+        recommender_relevance.train(train_df, iter=itr)        
 
         cp10_tmp_list_pred = []
         cp100_tmp_list_pred = []
@@ -873,6 +975,43 @@ def main(flag=flag):
         precision_tmp_list_pred = []
         precision_tmp_list_pop = []
         precision_tmp_list_pers_pop = []
+
+        # # Перед этим — предсказать uplift/relevance на train_df:
+        train_df["uplift"] = recommender_uplift.predict(train_df)
+        train_df["relevance"] = recommender_relevance.predict(train_df)
+
+        # # epsilon = 1e-6
+        # # train_df["uplift_adj"] = train_df["uplift"] / (train_df["propensity"] + epsilon)
+        # train_df["rel2"] = train_df["relevance"] * train_df["relevance"]
+        # train_df["uplift_x_rel"] = train_df["uplift"] * train_df["relevance"]
+        # train_df["uplift_minus_rel"] = np.abs(train_df["uplift"] - train_df["relevance"])
+
+        # features = ["uplift", "relevance", "propensity", 
+        #             # "uplift_adj", 
+        #             "rel2",
+        #             "uplift_x_rel", "uplift_minus_rel"
+        #             ]
+        # X_train = train_df[features]
+        # y_train = train_df["outcome"]
+
+        # # LGBM Group info — например, по пользователям:
+        # group_sizes = train_df.groupby("idx_user").size().values
+        # lgb_train = lgb.Dataset(X_train, label=y_train, group=group_sizes)
+
+        # params = {
+        #     "objective": "lambdarank",
+        #     "metric": "ndcg",
+        #     "ndcg_eval_at": [10],
+        #     "learning_rate": 0.05,
+        #     "num_leaves": 31,
+        #     "min_data_in_leaf": 20,
+        #     "verbose": -1,
+        # }
+
+        # ranker = lgb.train(params, lgb_train, num_boost_round=100)
+
+        reranker_model = train_reranker_logreg(train_df)  # train_df содержит uplift, relevance, propensity, outcome
+
 
         if flag.dataset == 'd' or 'p':
             for t in range(num_times):
@@ -963,7 +1102,154 @@ def main(flag=flag):
                 test_df_t['frequency'] = test_df_t['personal_popular']
                 test_df_t['personal_popular'] = test_df_t['personal_popular'] + test_df_t['popularity']
 
-                test_df_t["pred"] = recommender.predict(test_df_t)
+                # test_df_t = test_df_t.sample(n=10000, random_state=42)
+
+                test_df_t["pred_upl"] = recommender_uplift.predict(test_df_t)
+                test_df_t["pred_rel"] = recommender_relevance.predict(test_df_t)
+
+
+                test_df_t["pred"] =  test_df_t["pred_upl"] hi can I be
+
+                # pareto_indices = fast_pareto(
+                #     test_df_t["pred_upl"].to_numpy(),
+                #     test_df_t["pred_rel"].to_numpy()
+                # )
+
+                # test_df_t["pred"] = 0
+                # test_df_t.loc[pareto_indices, "pred"] = 1
+
+                # Предположим, test_df_t — это DataFrame с предсказаниями
+                # pred_upl — предсказание uplift
+                # pred_rel — предсказание relevance
+
+                # Шаг 1: Подготовим матрицу признаков
+                # F = test_df_t[["pred_upl", "pred_rel"]].to_numpy() * -1  # отрицание — так как pymoo минимизирует
+
+                # Шаг 2: Найдём индексы Pareto-фронта
+                # Получение индексов фронта
+                # nds = NonDominatedSorting().do(F, only_non_dominated_front=True)
+
+                # # Создание новой колонки
+                # test_df_t["pred"] = 0  # по умолчанию всем 0
+                # test_df_t.loc[nds, "pred"] = 1  # фронту присваиваем 1
+
+                # test_df_t["pred"] = predict_reranker(reranker_model, test_df_t)
+
+                # from sklearn.preprocessing import MinMaxScaler
+
+                # test_df_t["uplift"] = recommender_uplift.predict(test_df_t)
+                # test_df_t["relevance"] = recommender_relevance.predict(test_df_t)
+
+                # # # Те же фичи:
+                # # test_df_t["uplift_adj"] = test_df_t["uplift"] / (test_df_t["propensity_estimate"] + epsilon)
+                # test_df_t["rel2"] = test_df_t["relevance"] * test_df_t["relevance"]
+                # test_df_t["uplift_x_rel"] = test_df_t["uplift"] * test_df_t["relevance"]
+                # test_df_t["uplift_minus_rel"] = np.abs(test_df_t["uplift"] - test_df_t["relevance"])
+
+                # X_test = test_df_t[features]
+                # test_df_t["pred"] = ranker.predict(X_test)
+
+
+                # from sklearn.linear_model import LogisticRegression
+                # from sklearn.model_selection import train_test_split
+
+                # import lightgbm as lgb
+
+                # # === Фичи и цель ===
+                # df = pd.DataFrame({
+                #     "idx_user": test_df_t["idx_user"],
+                #     "idx_item": test_df_t["idx_item"],
+                #     "uplift": test_df_t["pred_upl"],
+                #     "relevance": test_df_t["pred_rel"],
+                #     "propensity": test_df_t["propensity_estimate"],
+                #     "label": test_df_t["outcome"],  # binary: click / purchase
+                # })
+
+                # # === Интерактивные признаки ===
+                # epsilon = 1e-6
+                # df["uplift_adj"] = df["uplift"] / (df["propensity"] + epsilon)
+                # df["uplift_x_rel"] = df["uplift"] * df["relevance"]
+                # df["uplift_minus_rel"] = np.abs(df["uplift"] - df["relevance"])
+
+                # # === Порядок фичей ===
+                # features = ["uplift", "relevance", "propensity", "uplift_adj", "uplift_x_rel", "uplift_minus_rel"]
+                # X = df[features]
+                # y = df["label"]
+
+                # # === Группировка: число айтемов на пользователя ===
+                # group_sizes = df.groupby("idx_user").size().values  # например, по 100 айтемов на пользователя
+
+                # # === Dataset for LGBM Ranker ===
+                # lgb_train = lgb.Dataset(X, label=y, group=group_sizes)
+
+                # params = {
+                #     "objective": "lambdarank",
+                #     "metric": "ndcg",
+                #     "ndcg_eval_at": [10],
+                #     "learning_rate": 0.05,
+                #     "num_leaves": 31,
+                #     "min_data_in_leaf": 20,
+                #     "verbose": -1,
+                # }
+
+                # ranker = lgb.train(
+                #     params,
+                #     lgb_train,
+                #     num_boost_round=100,
+                # )
+
+                # df["pred_score"] = ranker.predict(X)
+
+                # # Запись обратно
+                # test_df_t["pred"] = df["pred_score"]
+
+
+
+
+                # df = pd.DataFrame({
+                #     "uplift": test_df_t["pred_upl"],
+                #     "relevance": test_df_t["pred_rel"],
+                #     "propensity_estimate": test_df_t["propensity_estimate"],
+                #     "label": test_df_t['outcome'],  # бинарная: click / purchase / treatment outcome
+                # })
+
+                # df["interaction"] = df["uplift"] * df["relevance"]
+
+                # X = df[["uplift", "relevance", "propensity_estimate"]]
+                # X["uplift"] = X["uplift"] * 2  # усиливаем вклад uplift
+                # X["uplift_corr"] = df["uplift"] / (df["propensity_estimate"] + 1e-6)
+
+                # model = LogisticRegression()
+                # model.fit(X, df["label"])
+                # test_df_t["pred"] = model.predict_proba(X)[:, 1]
+
+                # y = df["label"]
+
+                # model = LogisticRegression()
+                # model.fit(X, y)
+
+                # # Предсказания для теста
+                # test_df_t["pred"] = model.predict_proba(X)[:, 1]
+
+
+                # scaler = MinMaxScaler()
+
+                # test_df_t["uplift_norm"] = scaler.fit_transform(test_df_t[["pred_upl"]])
+                # test_df_t["relevance_norm"] = scaler.fit_transform(test_df_t[["pred_rel"]])
+
+                # # Стабилизация логарифмом (добавляем epsilon для избежания log(0))
+                # epsilon = 1e-6
+                # alpha = 0.3
+                # test_df_t["pred"] = (
+                #     alpha * np.log(test_df_t["uplift_norm"] + epsilon) +
+                #     (1 - alpha) * np.log(test_df_t["relevance_norm"] + epsilon)
+                # )
+
+
+                # # # Складываем нормализованные значения
+                # # test_df_t["pred"] = new["pred_norm"] + new["pred_mf_norm"]
+
+                # # print(test_df_t)
                 evaluator = Evaluator()
 
 

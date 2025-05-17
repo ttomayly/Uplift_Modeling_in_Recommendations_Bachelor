@@ -1115,7 +1115,7 @@ def train_propensity(train_df, vali_df, test_df, flag, num_users, num_items, num
     sample_item = tf.constant([0]) 
     _ = model((sample_user, sample_item))  # This builds all layers 
     # model.load_weights("/Users/tanyatomayly/Desktop/PropCare-main/results/default/.weights.h5")
-    model.load_weights("vesa_orig_dr/.weights.h5")
+    model.load_weights("/Users/tanyatomayly/Desktop/PropCare-main/no/vesa_pers_dr/.weights.h5")
     
     # model.save_weights("source myenv/bin/activate./results/default/.weights.h5")  # Замени путь на нужный
 

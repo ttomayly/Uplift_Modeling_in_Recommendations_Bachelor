@@ -3079,32 +3079,32 @@ class DLMF3(Recommender):
     #                     print("DLMF weights saved.")
     #                 return err / iter
 
-    # def predict(self, df):
-    #     users = df[self.colname_user].values
-    #     items = df[self.colname_item].values
-    #     pred = np.zeros(len(df))
-    #     for n in np.arange(len(df)):
-    #         pred[n] = np.inner(self.user_factors[users[n], :], self.item_factors[items[n], :])
-    #         if self.with_bias:
-    #             pred[n] += self.item_biases[items[n]]
-    #             pred[n] += self.user_biases[users[n]]
-    #             pred[n] += self.global_bias
-    #     return pred
-    
-    def predict(self, df): 
-        users = df[self.colname_user].values 
-        items = df[self.colname_item].values 
-        frequencies = df[self.colname_frequency].values 
-        pred = np.zeros(len(df)) 
-        for n in np.arange(len(df)): 
-            pred[n] = np.inner(self.user_factors[users[n], :], (self.item_factors[items[n], :])) + frequencies[n] 
-            if self.with_bias: 
-                pred[n] += self.item_biases[items[n]] 
-                pred[n] += self.user_biases[users[n]] 
-                pred[n] += self.global_bias 
- 
-        # pred = 1 / (1 + np.exp(-pred)) 
+    def predict(self, df):
+        users = df[self.colname_user].values
+        items = df[self.colname_item].values
+        pred = np.zeros(len(df))
+        for n in np.arange(len(df)):
+            pred[n] = np.inner(self.user_factors[users[n], :], self.item_factors[items[n], :])
+            if self.with_bias:
+                pred[n] += self.item_biases[items[n]]
+                pred[n] += self.user_biases[users[n]]
+                pred[n] += self.global_bias
         return pred
+    
+    # def predict(self, df): 
+    #     users = df[self.colname_user].values 
+    #     items = df[self.colname_item].values 
+    #     frequencies = df[self.colname_frequency].values 
+    #     pred = np.zeros(len(df)) 
+    #     for n in np.arange(len(df)): 
+    #         pred[n] = np.inner(self.user_factors[users[n], :], (self.item_factors[items[n], :])) + frequencies[n] 
+    #         if self.with_bias: 
+    #             pred[n] += self.item_biases[items[n]] 
+    #             pred[n] += self.user_biases[users[n]] 
+    #             pred[n] += self.global_bias 
+ 
+    #     # pred = 1 / (1 + np.exp(-pred)) 
+    #     return pred
 
 
 
