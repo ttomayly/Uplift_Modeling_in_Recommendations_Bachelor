@@ -1,42 +1,83 @@
-# Code repository for PropCare
+# PropCare + DLCE: Uplift Modeling in Recommender Systems
 
-This is the implementation of paper "Estimating Propensity for Causality-based Recommendation without Exposure Data" presented in NeurIPS 2023 ([link to paper](https://arxiv.org/abs/2310.20388)).
+This repository contains the official implementation for the bachelor thesis **"Uplift Modeling in Recommender Systems"** (HSE, 2025). The project addresses causal recommendation with a focus on uplift modeling — estimating the **causal effect** of showing an item to a user.
 
-## Description of each file:
+It extends and enhances two recent models:
 
-baselines.py: including codes for DLCE model (or some other recommendation models) (Many thanks to Masahiro Sato for their open source codes)
+- **PropCare** (NeurIPS 2023): Estimation of propensity scores from implicit feedback.
+- **DLCE** (RecSys 2020): Debiased Learning for the Causal Effect of recommendation using Inverse Propensity Scoring.
 
-evaluator.py: evaluation code to compute CP@10, CP@100 and CDCG (Many thanks to Masahiro Sato for their open source codes)
+Additional contributions include improvements to PropCare and a **Doubly Robust** extension of DLCE, along with the researching the hybrid approaches of finding the balance between the uplift and relevance.
 
-main.py: the entrance of the program
+---
 
-models.py: codes for our proposed PropCare model
+## 📁 Repository Structure
 
-train.py: training codes, also including data loading related codes
+| File                   | Description                                                                 |
+|------------------------|-----------------------------------------------------------------------------|
+| `main.py`              | Script to run training and evaluation                                       |
+| `train.py`             | Dataset loading and training loop for PropCare                              |
+| `PropCare_new.py`      | Enhanced version of the PropCare                                            |
+| `PropCare_old.py`      | Original implementation of PropCare                                         |
+| `prediction_models.py` | Original implementation of DLCE, DR-DLCE and other baselines                |
+| `uplift_relevance.py`  | Re-ranking models: Pareto, logistic regression, LightGBM Ranker             |
+| `evaluator.py`         | Evaluation metrics: CP@10, CP@100, CDCG, NDCG@10, etc.                      |
+| `CJBR.py`, `EM.py`     | Baseline models: combinational joint learning and EM-based approach         |
 
-/model: the check point of optimzed models.
+--
 
-## Requirements (Environment)
-	python >= 3.6
-	tensorflow >= 2.2.0
-  	numpy
-  	pandas
-  	tqdm 
-  	pathlib 
+## 📦 Dataset
 
+We use the **Dunnhumby** semi-synthetic dataset, both:
+- `original` — uniform treatment assignment
+- `personalized` — user-specific assignment probabilities
 
-## Dataset & How to run:
+Follow the setup instructions from the original data source:  
+https://arxiv.org/abs/2008.04563
 
-1. Since the semi-simulated dataset is quite large (~2GB each), you should download from the original source.
-Download the raw data and code for generating semi-simulated from https://arxiv.org/abs/2008.04563 (DH) and https://arxiv.org/abs/2012.09442 (ML), generate the dataset as guided in their `README` files.
+Set dataset paths manually in `prepare_data()` inside `train.py`.
 
-2. Modify the path to dataset in `prepare_data` of train.py
+---
 
-3. Set all parameters in main.py
+## 🚀 How to Run
 
-4. Execute "python -u main.py --dataset d" for DH_original dataset, "python -u main.py --dataset p" for DH_personalized dataset, "python -u main.py --dataset ml" for ML dataset.
+Before running the project, install dependencies:
 
-   The check points of optimzed models for each dataset are avaliable in /model.
+```bash
+pip install -r requirements.txt
+```
 
-## Contact
-For any questions, please contact me (zzliu[DOT]2020[AT]phdcs[DOT]smu[DOT]edu[DOT]sg)
+Run experiments with:
+
+```bash
+python -u main.py --dataset d    # Dunnhumby original
+python -u main.py --dataset p    # Dunnhumby personalized
+```
+
+You can modify model type and training configs in `main.py`.
+
+| Flag | Description |
+|------|-------------|
+| `--dataset` | Select dataset: `'d'` for Dunnhumby (original, uniform treatment), `'p'` for personalized version |
+| `--propensity_model` | Propensity estimation model: `mod_propcare` (default), `propcare`, `em`, `cjbr` |
+| `--prediction_model` | Prediction/uplift model: `drdlmf` (Doubly Robust), `dlmf`, `mf`, `cause`, `causeneigh` |
+| `--uplift_relevance` | Strategy to combine uplift and relevance: `no`, `pareto`, `lgbm`, `logreg`, `if` |
+| `--ablation_variant` | For ablation study: disable components like dropout, BCE losses, etc. (e.g., `no_dropout`) | and etc.
+
+Example: Run improved PropCare with DR-DLMF and LightGBM reranker on personalized data
+
+```bash
+python -u main.py --dataset p --propensity_model mod_propcare --prediction_model drdlmf --uplift_relevance lgbm
+```
+
+## 💡 Citation
+
+If you use this code in your research or project, please cite:
+
+```
+Tanya Tomayly (2025). Uplift Modeling in Recommender Systems. Bachelor Thesis, HSE University.
+```
+
+## 🤝 Acknowledgements
+
+Thanks to Zhongzhou Liu for the [open-source implementation]((https://github.com/mediumboat/PropCare)) of some baseline models and evaluation code.

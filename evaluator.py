@@ -34,7 +34,6 @@ class Evaluator():
         return df_ranking
     
     
-
     def get_ranking_relavance(self, df, num_rec=10):
         df = df.sort_values(by=[self.colname_user, self.colname_relavance], ascending=False)
         df_ranking = df.groupby(self.colname_user).head(num_rec)
@@ -62,20 +61,6 @@ class Evaluator():
                 if not np.isnan(tau):
                     taus.append(tau)
         return np.nanmean(taus) if taus else np.nan
-
-
-    # def kendall_tau_per_user(self, df, user_col, rank_col_1, rank_col_2):
-    #     taus = []
-    #     for _, group in df.groupby(user_col):
-    #         if len(group) > 1:
-    #             order_1 = group[rank_col_1].rank(ascending=False, method='first')
-    #             order_2 = group[rank_col_2].rank(ascending=False, method='first')
-    #             tau, _ = kendalltau(order_1, order_2)
-    #             print(order_1)                
-    #             print(order_2)
-    #             print(tau)
-    #             taus.append(tau)
-    #     return np.nanmean(taus)
     
 
     def spearman_per_user(self,df, user_col, rank_col_1, rank_col_2):
@@ -242,12 +227,6 @@ class Evaluator():
             df_ranking = self.get_sorted(df, sort_by=self.colname_personal_popularity)
             return float(np.nanmean(df_ranking.groupby(self.colname_user)[self.colname_effect]
                                     .apply(lambda x: self.dcg_at_k(x))))
-        
-        # elif measure == 'CDCG':
-        #     df_ranking = self.get_ranking(df, num_rec=num_rec)
-        #     return float(np.nanmean(df_ranking.groupby(self.colname_user).agg({self.colname_effect: self.dcg_at_k})))
-            # return float(np.nanmean(df.groupby(self.colname_user).agg({self.colname_effect: self.dcg_at_k})))
-
         elif measure == 'CDCGIPS':
             return float(np.nanmean(df.groupby(self.colname_user).agg({self.colname_estimate: self.dcg_at_k})))
         elif measure == 'AR':
@@ -306,17 +285,6 @@ class Evaluator():
         k = min(self.rank_k, len(x))  # rank_k is global variable
         return sum(x[:k]) / k
 
-    # def dcg_at_k(self, x):
-    #     k = min(self.rank_k, len(x))  # rank_k is global variable
-    #     return np.sum(x[:k] / np.log2(np.arange(k) + 2))
-
-    # def ndcg_at_k(self, x):
-    #     k = min(self.rank_k, len(x))  # rank_k is global variable
-    #     max_dcg_at_k = self.dcg_at_k(sorted(x, reverse=True))
-    #     if max_dcg_at_k == 0:
-    #         return np.nan
-    #     else:
-    #         return self.dcg_at_k(x) / max_dcg_at_k
 
     def dcg_at_k(self, rel_values):
         k = min(self.rank_k, len(rel_values))

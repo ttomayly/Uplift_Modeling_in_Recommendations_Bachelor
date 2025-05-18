@@ -24,16 +24,12 @@ class CJBPR(tf.keras.Model):
         self.epochs = epochs
         self.display = display_interval
         
-        # Initialize data structures
         self._init_data_structures()
         
-        # Preprocess data
         self._preprocess_data(train_df, vali_df, test_df)
         
-        # Build model components
         self._build_components()
         
-        # Setup optimizer
         self.optimizer = tf.keras.optimizers.Adam(learning_rate)
         self.compile(optimizer=self.optimizer)
 
@@ -54,11 +50,9 @@ class CJBPR(tf.keras.Model):
 
     def _preprocess_data(self, train_df, vali_df, test_df):
         """Preprocess all input data with memory efficiency"""
-        # Process training data
         train_df = train_df[train_df['outcome'] >= 1].copy()
         train_df = train_df.drop(columns=['outcome'])
         
-        # Create mappings
         all_users = sorted(train_df['idx_user'].unique())
         all_items = sorted(train_df['idx_item'].unique())
         
@@ -68,22 +62,17 @@ class CJBPR(tf.keras.Model):
         self.num_users = len(self.user_map)
         self.num_items = len(self.item_map)
         
-        # Apply mappings
         self.train_df = train_df.copy()
         self.train_df['idx_user'] = self.train_df['idx_user'].map(self.user_map)
         self.train_df['idx_item'] = self.train_df['idx_item'].map(self.item_map)
         
-        # Split data into components
         self._split_data_into_components()
         
-        # Compute item popularity
         self._compute_item_popularity()
         
-        # Process validation and test data
         self._process_validation_data(vali_df)
         self._process_test_data(test_df)
         
-        # Create training like lists
         self._create_training_lists()
 
     def _split_data_into_components(self):
@@ -158,7 +147,6 @@ class CJBPR(tf.keras.Model):
         """Build model components with proper initialization"""
         initializer = tf.keras.initializers.RandomNormal(stddev=0.03)
         
-        # Initialize all components as float32
         self.P = [self.add_weight(
             name=f'P_{i}',
             shape=(self.num_users, self.hidden_dim),
@@ -212,16 +200,13 @@ class CJBPR(tf.keras.Model):
         """Memory-efficient call implementation"""
         u_batch, i_batch = inputs
         
-        # Convert inputs to proper types and shapes
         u_batch = tf.reshape(tf.cast(u_batch, tf.int32), [-1])  # Flatten to [batch_size]
         i_batch = tf.reshape(tf.cast(i_batch, tf.int32), [-1])  # Flatten to [batch_size]
         
-        # Initialize outputs
         batch_size = tf.shape(u_batch)[0]
         r_pred = tf.zeros([batch_size], dtype=tf.float32)  # Now 1D tensor
         p_pred = tf.zeros([batch_size], dtype=tf.float32)  # Now 1D tensor
         
-        # Process in smaller chunks if batch is too large
         max_chunk_size = 5000  # Adjust based on your GPU memory
         num_chunks = tf.cast(tf.math.ceil(batch_size / max_chunk_size), tf.int32)
         
@@ -234,7 +219,6 @@ class CJBPR(tf.keras.Model):
             
             r_chunk, p_chunk = self._process_chunk(u_chunk, i_chunk)
             
-            # Update the corresponding positions in the output tensors
             r_pred = tf.tensor_scatter_nd_update(
                 r_pred, 
                 tf.reshape(tf.range(start, end), [-1, 1]),
@@ -254,34 +238,26 @@ class CJBPR(tf.keras.Model):
 
     def _process_chunk(self, u_chunk, i_chunk):
         """Process a chunk of data"""
-        # Initialize outputs as 1D tensors
         r_chunk = tf.zeros(tf.shape(u_chunk)[0], dtype=tf.float32)  # Shape [batch_size]
         p_chunk = tf.zeros(tf.shape(u_chunk)[0], dtype=tf.float32)  # Shape [batch_size]
         
         for m in range(self.C):
-            # Get embeddings for this chunk
             p = tf.nn.embedding_lookup(self.P[m], u_chunk)  # Shape [batch_size, hidden_dim]
             q = tf.nn.embedding_lookup(self.Q[m], i_chunk)  # Shape [batch_size, hidden_dim]
             
-            # Relevance prediction - sum reduces to [batch_size]
             r_chunk += tf.reduce_sum(p * q, axis=1)
             
-            # Exposure prediction - optimized to avoid large intermediate tensors
             # Compute w term
             w_term = tf.nn.sigmoid(
                 tf.reduce_sum(q * self.a[m][:, 0], axis=1) + tf.squeeze(self.b[m]))  # Shape [batch_size]
             
-            # Compute first part of pop
             c_term = tf.nn.sigmoid(
                 tf.reduce_sum(q * self.c[m][:, 0], axis=1) + tf.squeeze(self.d[m]))  # Shape [batch_size]
             
-            # Get item popularity values
             pop_values = tf.gather(tf.squeeze(self.item_pop_tensor), i_chunk)  # Shape [batch_size]
             
-            # Combine with w term
             first_part = w_term * c_term + (1 - w_term) * pop_values  # Shape [batch_size]
             
-            # Compute exponent term
             exponent = tf.nn.sigmoid(
                 tf.reduce_sum(q * self.e[m][:, 0], axis=1) + tf.squeeze(self.f[m]))  # Shape [batch_size]
             
@@ -309,26 +285,20 @@ class CJBPR(tf.keras.Model):
                 i_pos_chunk = i_pos_batch[i:i+chunk_size]
                 i_neg_chunk = i_neg_batch[i:i+chunk_size]
                 
-                # Process positive and negative samples separately
                 r_pos, p_pos = self((u_chunk, i_pos_chunk), training=True)
                 r_neg, p_neg = self((u_chunk, i_neg_chunk), training=True)
                 
-                # Compute losses for this chunk
                 rel_loss = -tf.reduce_mean(tf.math.log(tf.nn.sigmoid(r_pos - r_neg)))
                 exp_loss = -tf.reduce_mean(tf.math.log(p_pos)) - tf.reduce_mean(tf.math.log(1 - p_neg))
                 losses.append((rel_loss, exp_loss))
             
-            # Average losses across chunks
             rel_loss = tf.reduce_mean([l[0] for l in losses])
             exp_loss = tf.reduce_mean([l[1] for l in losses])
             
-            # Regularization loss
             reg_loss = self._compute_regularization_loss()
             
-            # Total loss
             total_loss = rel_loss + exp_loss + reg_loss
         
-        # Compute and apply gradients
         gradients = tape.gradient(total_loss, self.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
         
@@ -415,40 +385,31 @@ class CJBPR(tf.keras.Model):
             u_end = min(u_start + user_batch_size, self.num_users)
             u_batch = np.arange(u_start, u_end)
             
-            # Only consider users with validation likes
             valid_u_batch = [u for u in u_batch if self.vali_like[u]]
             if not valid_u_batch:
                 continue
                 
-            # Initialize scores for this user batch
             user_scores = np.zeros((len(valid_u_batch), self.num_items))
             
-            # Process items in batches
             for i_start in range(0, self.num_items, item_batch_size):
                 i_end = min(i_start + item_batch_size, self.num_items)
                 i_batch = np.arange(i_start, i_end)
                 
-                # Create input tensors
                 u_tiled = np.repeat(valid_u_batch, len(i_batch))
                 i_tiled = np.tile(i_batch, len(valid_u_batch))
                 
-                # Get predictions
                 r_batch, _ = self((u_tiled, i_tiled), training=False)
                 r_batch = r_batch.numpy().reshape(len(valid_u_batch), len(i_batch))
                 
-                # Update scores
                 user_scores[:, i_start:i_end] = r_batch
             
-            # Evaluate recall for each user in this batch
             for i, u in enumerate(valid_u_batch):
                 scores = user_scores[i]
                 train_items = self.train_like[u]
                 test_items = self.vali_like[u]
                 
-                # Mask out training items
                 scores[train_items] = -np.inf
                 
-                # Get top 10 items
                 top_items = np.argsort(-scores)[:10]
                 
                 # Calculate recall
@@ -476,26 +437,20 @@ class CJBPR(tf.keras.Model):
             u_end = min(u_start + user_batch_size, len(self.test_users))
             u_batch = self.test_users[u_start:u_end]
             
-            # Initialize scores for this user batch
             user_scores = np.zeros((len(u_batch), self.num_items))
             
-            # Process items in batches
             for i_start in range(0, self.num_items, item_batch_size):
                 i_end = min(i_start + item_batch_size, self.num_items)
                 i_batch = np.arange(i_start, i_end, dtype=np.int32)  # Ensure integer type
                 
-                # Create input tensors
                 u_tiled = np.repeat(u_batch, len(i_batch))
                 i_tiled = np.tile(i_batch, len(u_batch))
                 
-                # Get predictions
                 r_batch, _ = self((u_tiled, i_tiled), training=False)
                 r_batch = r_batch.numpy().reshape(len(u_batch), len(i_batch))
                 
-                # Update scores
                 user_scores[:, i_start:i_end] = r_batch
             
-            # Evaluate recall for each user in this batch
             for i, u in enumerate(u_batch):
                 idx = u_start + i
                 test_items = self.test_interact[idx]
@@ -504,7 +459,6 @@ class CJBPR(tf.keras.Model):
                 if len(test_likes) == 0:
                     continue
                     
-                # Ensure test_items are integers
                 test_items = np.array(test_items, dtype=np.int32)
                 
                 # Get scores for test items only
@@ -586,163 +540,3 @@ class CJBPR(tf.keras.Model):
         model.load_weights(os.path.join(path, 'weights'))
         
         return model
-# import pandas as pd
-# import numpy as np
-# import tensorflow as tf
-# import os
-# from tqdm import tqdm
-
-# # === Вспомогательные функции === #
-# def get_train_instances(train_df, num_negatives=5):
-#     """
-#     Создаёт обучающие примеры с отрицательными примерами (negative sampling)
-#     """
-#     user_input, item_input, labels, propensities = [], [], [], []
-#     user_item_set = set(zip(train_df['idx_user'], train_df['idx_item']))
-#     all_items = train_df['idx_item'].unique()
-
-#     for u, i, p in zip(train_df['idx_user'], train_df['idx_item'], train_df['propensity']):
-#         user_input.append(u)
-#         item_input.append(i)
-#         labels.append(1)
-#         propensities.append(p)
-
-#         for _ in range(num_negatives):
-#             j = np.random.choice(all_items)
-#             while (u, j) in user_item_set:
-#                 j = np.random.choice(all_items)
-#             user_input.append(u)
-#             item_input.append(j)
-#             labels.append(0)
-#             propensities.append(1.0)
-
-#     return np.array(user_input), np.array(item_input), np.array(labels), np.array(propensities)
-
-# # === Класс модели CJBPR (адаптация из статьи) === #
-# class CJBPR:
-#     def __init__(self, sess, args, train_df,
-#                  train_like=None, vali_like=None,
-#                  test_user=None, test_interact=None,
-#                  test_like=None, item_pop=None):
-#         """
-#         Адаптированная версия модели CJBPR из статьи (без TF 1.x сессии)
-#         Все параметры кроме train_df можно опустить или передавать как None
-#         """
-#         self.sess = sess
-#         self.args = args
-#         self.train_df = train_df
-#         self.train_like = train_like
-#         self.vali_like = vali_like
-#         self.test_user = test_user
-#         self.test_interact = test_interact
-#         self.test_like = test_like
-#         self.item_pop = item_pop
-
-#         self.num_users = args.num_users
-#         self.num_items = args.num_items
-#         self.hidden = args.hidden
-#         self.neg = args.neg
-#         self.bs = args.bs
-#         self.p_weight = args.p_weight
-
-#         # Эмбеддинги пользователей и товаров
-#         self.user_emb = tf.Variable(tf.random.normal([self.num_users, self.hidden]), name="user_emb")
-#         self.item_emb = tf.Variable(tf.random.normal([self.num_items, self.hidden]), name="item_emb")
-
-#         # MLP для пропенсити и релевантности
-#         self.propensity_mlp = tf.keras.Sequential([
-#             tf.keras.layers.Dense(64, activation='relu'),
-#             tf.keras.layers.Dense(1, activation='sigmoid')
-#         ])
-#         self.relevance_mlp = tf.keras.Sequential([
-#             tf.keras.layers.Dense(64, activation='relu'),
-#             tf.keras.layers.Dense(1, activation='sigmoid')
-#         ])
-
-#     def __call__(self, inputs, training=False):
-#         u, i = inputs
-#         u_emb = tf.nn.embedding_lookup(self.user_emb, u)
-#         i_emb = tf.nn.embedding_lookup(self.item_emb, i)
-#         x = tf.concat([u_emb, i_emb], axis=-1)
-
-#         propensity = self.propensity_mlp(x)
-#         relevance = self.relevance_mlp(x)
-#         score = tf.reduce_sum(u_emb * i_emb, axis=1, keepdims=True)
-
-#         return score, tf.squeeze(propensity), tf.squeeze(relevance), x
-
-#     def train(self):
-#         """
-#         Основной цикл обучения модели
-#         """
-#         user_input, item_input, labels, propensities = get_train_instances(self.train_df, self.neg)
-#         dataset = tf.data.Dataset.from_tensor_slices(((user_input, item_input), labels, propensities))
-#         dataset = dataset.shuffle(100_000).batch(self.bs)
-
-#         optimizer = tf.keras.optimizers.Adam(learning_rate=self.args.lr)
-
-#         for epoch in range(self.args.epoch):
-#             total_loss = 0
-#             for (u, i), y, p in dataset:
-#                 with tf.GradientTape() as tape:
-#                     score, pred_p, pred_r, _ = self((u, i), training=True)
-#                     loss_click = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.cast(y, tf.float32), logits=score[:, 0]))
-#                     loss_p = tf.reduce_mean(tf.square(pred_p - p))
-#                     loss_r = tf.reduce_mean(tf.square(pred_r - tf.cast(y, tf.float32)))
-#                     loss = loss_click + self.p_weight * loss_p + (1 - self.p_weight) * loss_r
-#                 grads = tape.gradient(loss, [self.user_emb, self.item_emb] + self.propensity_mlp.trainable_variables + self.relevance_mlp.trainable_variables)
-#                 optimizer.apply_gradients(zip(grads, [self.user_emb, self.item_emb] + self.propensity_mlp.trainable_variables + self.relevance_mlp.trainable_variables))
-#                 total_loss += loss.numpy()
-#             print(f"Epoch {epoch + 1}, Loss: {total_loss:.4f}")
-
-#         # Сохраняем веса эмбеддингов
-#         os.makedirs("./saved_weights", exist_ok=True)
-#         np.save("./saved_weights/user_emb.npy", self.user_emb.numpy())
-#         np.save("./saved_weights/item_emb.npy", self.item_emb.numpy())
-
-#     def predict_scores(self, df):
-#         """
-#         Предсказание пропенсити и релевантности по батчам
-#         """
-#         test_users = tf.convert_to_tensor(df['idx_user'].values)
-#         test_items = tf.convert_to_tensor(df['idx_item'].values)
-#         test_t_data = tf.data.Dataset.from_tensor_slices((test_users, test_items))
-
-#         r_pred_test, p_pred_test = None, None
-#         for u, i in test_t_data.batch(5000):
-#             _, p_batch, r_batch, _ = self((u, i), training=False)
-#             if r_pred_test is None:
-#                 r_pred_test = r_batch
-#                 p_pred_test = p_batch
-#             else:
-#                 r_pred_test = tf.concat((r_pred_test, r_batch), axis=0)
-#                 p_pred_test = tf.concat((p_pred_test, p_batch), axis=0)
-
-#         return p_pred_test.numpy(), r_pred_test.numpy()
-
-# # === Аргументы для инициализации === #
-# class Args:
-#     num_users = 1000
-#     num_items = 1000
-#     hidden = 64
-#     neg = 5
-#     bs = 1024
-#     epoch = 10
-#     lr = 0.001
-#     p_weight = 0.4
-
-# # === Пример использования === #
-# if __name__ == '__main__':
-#     df = pd.read_csv("/mnt/data/data_train.csv")
-#     args = Args()
-#     sess = tf.compat.v1.Session()
-
-#     # В реальности тебе нужно заранее задать num_users и num_items, либо получить из данных:
-#     args.num_users = df['idx_user'].nunique()
-#     args.num_items = df['idx_item'].nunique()
-
-#     model = CJBPR(sess, args, train_df=df)
-#     model.train()
-
-#     propensity, relevance = model.predict_scores(df)
-#     print("First 10 relevance predictions:", relevance[:10])

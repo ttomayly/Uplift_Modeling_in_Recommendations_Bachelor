@@ -160,7 +160,6 @@ class Causal_Model(Model, ABC):
             
             flags = Flags(flags_config)
 
-            # Process tensors with proper error handling
             item_popularity = deserialize_array(config.get('item_popularity'))
             if item_popularity is None:
                 item_popularity = tf.zeros((num_items,), dtype=tf.float32)
@@ -270,13 +269,10 @@ class Causal_Model(Model, ABC):
             p_loss = self.kl(p1, q1) + self.kl(p2, q2)
             reg_loss = 0.0001 * (tf.add_n(self.losses) + film_reg_loss_1 + film_reg_loss_2) + self.p_weight * p_loss
 
-            # Final loss
             loss = self.lambda_1 * loss_pair + loss_click + reg_loss
         
-        # Calculate gradients
         gradients = tape2.gradient(loss, self.trainable_weights)
 
-        # Apply gradients using the optimizer
         self.estimator_optimizer.apply_gradients(zip(gradients, self.trainable_weights))
 
 if __name__ == "__main__":
