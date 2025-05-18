@@ -231,41 +231,41 @@ class CJBPR(tf.keras.Model):
             )
         
         return (
-            tf.reshape(r_pred / self.C, [-1, 1]),  # Reshape to [batch_size, 1]
-            tf.reshape(p_pred / self.C, [-1, 1])   # Reshape to [batch_size, 1]
+            tf.reshape(r_pred / self.C, [-1, 1]),
+            tf.reshape(p_pred / self.C, [-1, 1]) 
         )
 
 
     def _process_chunk(self, u_chunk, i_chunk):
         """Process a chunk of data"""
-        r_chunk = tf.zeros(tf.shape(u_chunk)[0], dtype=tf.float32)  # Shape [batch_size]
-        p_chunk = tf.zeros(tf.shape(u_chunk)[0], dtype=tf.float32)  # Shape [batch_size]
+        r_chunk = tf.zeros(tf.shape(u_chunk)[0], dtype=tf.float32) 
+        p_chunk = tf.zeros(tf.shape(u_chunk)[0], dtype=tf.float32)
         
         for m in range(self.C):
-            p = tf.nn.embedding_lookup(self.P[m], u_chunk)  # Shape [batch_size, hidden_dim]
-            q = tf.nn.embedding_lookup(self.Q[m], i_chunk)  # Shape [batch_size, hidden_dim]
+            p = tf.nn.embedding_lookup(self.P[m], u_chunk)
+            q = tf.nn.embedding_lookup(self.Q[m], i_chunk)
             
             r_chunk += tf.reduce_sum(p * q, axis=1)
             
             # Compute w term
             w_term = tf.nn.sigmoid(
-                tf.reduce_sum(q * self.a[m][:, 0], axis=1) + tf.squeeze(self.b[m]))  # Shape [batch_size]
+                tf.reduce_sum(q * self.a[m][:, 0], axis=1) + tf.squeeze(self.b[m])) 
             
             c_term = tf.nn.sigmoid(
-                tf.reduce_sum(q * self.c[m][:, 0], axis=1) + tf.squeeze(self.d[m]))  # Shape [batch_size]
+                tf.reduce_sum(q * self.c[m][:, 0], axis=1) + tf.squeeze(self.d[m]))
             
-            pop_values = tf.gather(tf.squeeze(self.item_pop_tensor), i_chunk)  # Shape [batch_size]
+            pop_values = tf.gather(tf.squeeze(self.item_pop_tensor), i_chunk)
             
-            first_part = w_term * c_term + (1 - w_term) * pop_values  # Shape [batch_size]
+            first_part = w_term * c_term + (1 - w_term) * pop_values
             
             exponent = tf.nn.sigmoid(
-                tf.reduce_sum(q * self.e[m][:, 0], axis=1) + tf.squeeze(self.f[m]))  # Shape [batch_size]
+                tf.reduce_sum(q * self.e[m][:, 0], axis=1) + tf.squeeze(self.f[m]))
             
             # Final pop calculation
-            pop = tf.pow(first_part, exponent)  # Shape [batch_size]
+            pop = tf.pow(first_part, exponent)
             p_chunk += tf.clip_by_value(pop, 0.01, 0.99)
         
-        return r_chunk, p_chunk  # Both shapes [batch_size]
+        return r_chunk, p_chunk 
 
     def train_step(self, data):
         """Training step with memory management"""
@@ -277,7 +277,7 @@ class CJBPR(tf.keras.Model):
         
         with tf.GradientTape() as tape:
             # Process in chunks to avoid OOM
-            chunk_size = min(5000, tf.shape(u_batch)[0])  # Adjust based on your GPU memory
+            chunk_size = min(5000, tf.shape(u_batch)[0]) 
             losses = []
             
             for i in range(0, tf.shape(u_batch)[0], chunk_size):
@@ -375,8 +375,8 @@ class CJBPR(tf.keras.Model):
     def _validate(self, epoch):
         """Memory-efficient validation"""
         # Process validation in batches to avoid OOM
-        user_batch_size = 100  # Process 100 users at a time
-        item_batch_size = 1000  # Process 1000 items at a time
+        user_batch_size = 100
+        item_batch_size = 1000
         
         recall_sum = 0.0
         valid_users = 0
@@ -427,8 +427,8 @@ class CJBPR(tf.keras.Model):
     def _test(self, epoch):
         """Memory-efficient testing"""
         # Process test users in batches
-        user_batch_size = 100  # Process 100 users at a time
-        item_batch_size = 1000  # Process 1000 items at a time
+        user_batch_size = 100
+        item_batch_size = 1000
         
         recall_sum = 0.0
         valid_users = 0
@@ -441,7 +441,7 @@ class CJBPR(tf.keras.Model):
             
             for i_start in range(0, self.num_items, item_batch_size):
                 i_end = min(i_start + item_batch_size, self.num_items)
-                i_batch = np.arange(i_start, i_end, dtype=np.int32)  # Ensure integer type
+                i_batch = np.arange(i_start, i_end, dtype=np.int32)
                 
                 u_tiled = np.repeat(u_batch, len(i_batch))
                 i_tiled = np.tile(i_batch, len(u_batch))
@@ -461,13 +461,10 @@ class CJBPR(tf.keras.Model):
                     
                 test_items = np.array(test_items, dtype=np.int32)
                 
-                # Get scores for test items only
-                scores = user_scores[i, test_items]  # Now test_items are guaranteed to be integers
+                scores = user_scores[i, test_items]
                 
-                # Get top 10 items
                 ranked = np.argsort(-scores)[:10]
                 
-                # Calculate recall
                 hits = 0
                 for pos in ranked:
                     if test_items[pos] in test_likes:

@@ -295,7 +295,7 @@ class Evaluator():
         rel = df_user[label_col].values
 
         k = min(self.rank_k, len(rel))
-        ideal_rel = np.sort(rel)[::-1]  # для идеального ранжирования
+        ideal_rel = np.sort(rel)[::-1]
 
         dcg = self.dcg_at_k(rel)
         idcg = self.dcg_at_k(ideal_rel)

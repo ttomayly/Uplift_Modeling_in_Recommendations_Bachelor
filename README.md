@@ -58,11 +58,10 @@ You can modify model type and training configs in `main.py`.
 
 | Flag | Description |
 |------|-------------|
-| `--dataset` | Select dataset: `'d'` for Dunnhumby (original, uniform treatment), `'p'` for personalized version |
-| `--propensity_model` | Propensity estimation model: `mod_propcare` (default), `propcare`, `em`, `cjbr` |
-| `--prediction_model` | Prediction/uplift model: `drdlmf` (Doubly Robust), `dlmf`, `mf`, `cause`, `causeneigh` |
-| `--uplift_relevance` | Strategy to combine uplift and relevance: `no`, `pareto`, `lgbm`, `logreg`, `if` |
-| `--ablation_variant` | For ablation study: disable components like dropout, BCE losses, etc. (e.g., `no_dropout`) | and etc.
+| `propensity_model` | Propensity estimation model: `mod_propcare` (default), `propcare`, `em`, `cjbr` |
+| `prediction_model` | Prediction/uplift model: `drdlmf` (Doubly Robust), `dlmf`, `mf`, `cause`, `causeneigh` |
+| `uplift_relevance` | Strategy to combine uplift and relevance: `no`, `pareto`, `lgbm`, `logreg`, `if` |
+| `ablation_variant` | For ablation study: disable components like dropout, BCE losses, etc. (e.g., `no_dropout`) | and etc.
 
 Example: Run improved PropCare with DR-DLMF and LightGBM reranker on personalized data
 
@@ -70,14 +69,14 @@ Example: Run improved PropCare with DR-DLMF and LightGBM reranker on personalize
 python -u main.py --dataset p --propensity_model mod_propcare --prediction_model drdlmf --uplift_relevance lgbm
 ```
 
-## 💡 Citation
+<!-- ## 💡 Citation
 
 If you use this code in your research or project, please cite:
 
 ```
 Tanya Tomayly (2025). Uplift Modeling in Recommender Systems. Bachelor Thesis, HSE University.
-```
+``` -->
 
 ## 🤝 Acknowledgements
 
-Thanks to Zhongzhou Liu for the [open-source implementation]((https://github.com/mediumboat/PropCare)) of some baseline models and evaluation code.
+Thanks to Zhongzhou Liu for the [open-source implementation](https://github.com/mediumboat/PropCare) of some baseline models and evaluation code.

@@ -1,10 +1,10 @@
 import argparse
-from train import prepare_data, train_propensity
-from train import plotpath
-from prediction_models import DLMF, PopularBase, MF, CausalNeighborBase, CausEProd, DLMF_DR, DLMF_MLP
+from relevance.train import prepare_data, train_propensity
+from relevance.train import plotpath
+from prediction.prediction_models import DLMF, PopularBase, MF, CausalNeighborBase, CausEProd, DLMF_DR, DLMF_MLP
 import numpy as np
-from CJBR import CJBPR
-from EM import train_propensity as train_propensity_em
+from relevance.CJBPR import CJBPR
+from relevance.EM import train_propensity as train_propensity_em
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
@@ -134,7 +134,7 @@ def main(flag=flag):
         flag.thres = 0.70
 
         t_pred = np.where(p_pred_t >= flag.thres, 1.0, 0.0)
-        p_pred = p_pred * 0.8 ## 0.8
+        p_pred = p_pred * 0.8
   
         train_df["propensity"] = np.clip(p_pred, 0.0001, 0.9999)
         train_df["treated"] = t_pred
@@ -150,21 +150,14 @@ def main(flag=flag):
             rf = 0.001
             itr = 100e6
 
-        with open("/Users/tanyatomayly/Desktop/PropCare-main/no/vesa_orig_dr/dlmf_weights.pkl", "rb") as f:
-            saved_state = pickle.load(f)
-
-        # recommender = DLMF(num_users, num_items, capping_T = cap, 
-        #                    capping_C = cap, learn_rate = lr, reg_factor = rf)
-
         if flag.uplift_relevance == 'no':
             if flag.prediction_model == 'drdlmf':
-                with open("/Users/tanyatomayly/Desktop/PropCare-main/no/vesa_orig_dr/dlmf_weights.pkl", "rb") as f:
-                    saved_state = pickle.load(f)
-                recommender = DLMF_DR(num_users, num_items, capping_T=cap, capping_C=cap, learn_rate=lr, reg_factor=rf, use_DR=True)
-                recommender.__dict__.update(saved_state)
-            # recommender_uplift.train(train_df, iter=itr)
+                # with open("dlmf_weights.pkl", "rb") as f:
+                #     saved_state = pickle.load(f)
                 # recommender = DLMF_DR(num_users, num_items, capping_T=cap, capping_C=cap, learn_rate=lr, reg_factor=rf, use_DR=True)
-                # recommender.train(train_df, iter=itr)
+                # recommender.__dict__.update(saved_state)
+                recommender = DLMF_DR(num_users, num_items, capping_T=cap, capping_C=cap, learn_rate=lr, reg_factor=rf, use_DR=True)
+                recommender.train(train_df, iter=itr)
             elif flag.prediction_model == 'dlmf':
                 recommender = DLMF(num_users, num_items, capping_T=cap, capping_C=cap, learn_rate=lr, reg_factor=rf)
                 recommender.train(train_df, iter=itr)
@@ -179,18 +172,12 @@ def main(flag=flag):
                 recommender.train(train_df, iter=itr)
 
 
-        # recommender_uplift.__dict__.update(saved_state)
-        # print("DLMF weights loaded successfully!")
-
         if flag.uplift_relevance != 'no':
-            with open("dlmf_weights.pkl", "rb") as f:
-                saved_state = pickle.load(f)
             recommender_uplift = DLMF_DR(num_users, num_items, capping_T=cap, capping_C=cap, learn_rate=lr, reg_factor=rf, use_DR=True)
-            recommender_uplift.__dict__.update(saved_state)
-            # recommender_uplift.train(train_df, iter=itr)
+            recommender_uplift.train(train_df, iter=itr)
             
             recommender_relevance = MF(num_users, num_items)
-            recommender_relevance.train(train_df, iter=1)        
+            recommender_relevance.train(train_df, iter=itr)        
 
         cp10_tmp_list_pred = []
         cp100_tmp_list_pred = []
@@ -216,15 +203,13 @@ def main(flag=flag):
         precision_tmp_list_pred = []
         precision_tmp_list_pop = []
 
-        # if flag.uplift_relevance != 'no':
-        #     train_df["pred_upl"] = recommender_uplift.predict(train_df)
-        #     train_df["pred_rel"] = recommender_relevance.predict(train_df)
-        
-        # train_df.to_csv("tralalala.csv")
-        train_df = pd.read_csv("tralalala.csv")
+        if flag.uplift_relevance != 'no':
+            train_df["pred_upl"] = recommender_uplift.predict(train_df)
+            train_df["pred_rel"] = recommender_relevance.predict(train_df)
+
 
         if flag.uplift_relevance == 'logreg':
-            reranker_model = train_reranker_logreg(train_df)  # train_df содержит uplift, relevance, propensity, outcome
+            reranker_model = train_reranker_logreg(train_df)
         if flag.uplift_relevance == 'lgbm':
             reranker_model = train_reranker_lgbm_with_tuning(train_df)
 
@@ -277,14 +262,9 @@ def main(flag=flag):
             popularity.columns = ["idx_item", "popularity"]
             test_df_t = test_df_t.merge(popularity, on="idx_item", how="left")
 
-            # if flag.uplift_relevance != 'no':
-            #     test_df_t["pred_upl"] = recommender_uplift.predict(test_df_t)
-            #     test_df_t["pred_rel"] = recommender_relevance.predict(test_df_t)
-
-            test_df_t = pd.read_csv('to.csv')
-
-            # test_df_t.to_csv("to.csv")
-
+            if flag.uplift_relevance != 'no':
+                test_df_t["pred_upl"] = recommender_uplift.predict(test_df_t)
+                test_df_t["pred_rel"] = recommender_relevance.predict(test_df_t)
 
             if flag.uplift_relevance == 'pareto':
                 pareto_indices = fast_pareto(
@@ -327,13 +307,13 @@ def main(flag=flag):
 
             evaluator = Evaluator()
 
-            kendall_score = evaluator.kendall_tau_per_user(test_df_t, 'idx_user', 'pred', 'relevance_estimate')
-            spearman_score = evaluator.spearman_per_user(test_df_t, 'idx_user', 'pred', 'relevance_estimate')
-            pos_diff = evaluator.avg_position_diff(test_df_t, 'idx_user', 'idx_item', 'pred', 'relevance_estimate')
+            # kendall_score = evaluator.kendall_tau_per_user(test_df_t, 'idx_user', 'pred', 'relevance_estimate')
+            # spearman_score = evaluator.spearman_per_user(test_df_t, 'idx_user', 'pred', 'relevance_estimate')
+            # pos_diff = evaluator.avg_position_diff(test_df_t, 'idx_user', 'idx_item', 'pred', 'relevance_estimate')
 
-            print(f"Kendall Tau: {kendall_score:.4f}")
-            print(f"Spearman Rho: {spearman_score:.4f}")
-            print(f"Average Rank Position Difference: {pos_diff:.4f}")
+            # print(f"Kendall Tau: {kendall_score:.4f}")
+            # print(f"Spearman Rho: {spearman_score:.4f}")
+            # print(f"Average Rank Position Difference: {pos_diff:.4f}")
 
 
             ndcg_tmp_list_rel.append(evaluator.evaluate(test_df_t, 'NDCGR', 10))

@@ -54,7 +54,6 @@ def train_propensity(train_df, vali_df, test_df, flag, num_users, num_items, num
 
         gamma = model.predict_proba(X)[:, 1]
 
-        # Логгирование для отладки
         print(f"--- Epoch {epoch+1} ---")
         print(f"Theta: {theta:.4f}")
         print(f"Labels mean: {labels.mean():.4f}")
