@@ -35,8 +35,6 @@ We use the **Dunnhumby** semi-synthetic dataset, both:
 Follow the setup instructions from the original data source:  
 https://arxiv.org/abs/2008.04563
 
-Set dataset paths manually in `prepare_data()` inside `train.py`.
-
 ---
 
 ## 🚀 How to Run
